@@ -1,6 +1,8 @@
 package com.bytedance.videoplayer;
 
 import android.content.res.Configuration;
+import android.media.MediaPlayer;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -14,6 +16,8 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.VideoView;
 
+import tv.danmaku.ijk.media.player.IMediaPlayer;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "husserl";
@@ -26,10 +30,15 @@ public class MainActivity extends AppCompatActivity {
     private static Handler mHandler;
     private updateThread videoUpdater;
     private static Integer lastPos;
+    private Bundle savedIS;
+
+    private Uri uri;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        savedIS = savedInstanceState;
+
         if(this.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
             //横屏
             initialLandscape();
@@ -58,6 +67,7 @@ public class MainActivity extends AppCompatActivity {
                     setTime(cur);
                     //Log.d(TAG, "" + length);
                     mVideoView.seekTo(cur);
+
                 }
             }
 
@@ -85,10 +95,7 @@ public class MainActivity extends AppCompatActivity {
                 switch (msg.what) {
                     case UPDATE_VIDEO_PROGRESS:
                         int mCur = mVideoView.getCurrentPosition();
-                        int mLength = mVideoView.getDuration();
                         setTime(mCur);
-                        float cur = (float)mCur / (float)mLength * 100;
-                        sk_video.setProgress((int)cur);
                 }
             }
         };
@@ -96,23 +103,49 @@ public class MainActivity extends AppCompatActivity {
         videoUpdater = new updateThread();
         videoUpdater.start();
 
-        if (savedInstanceState != null) {//恢复日志
-            mVideoView.seekTo((int)lastPos);
-            setTime((int)lastPos);
-            Log.d(TAG, "true lastPos:" + lastPos);
-        }
-        else {//如果是第一次调用onCreate，lastPos需要初始化
-            lastPos = 1;
-            mVideoView.seekTo((int)lastPos);
-            setTime((int)lastPos);
-            Log.d(TAG, "false lastPos:" + lastPos);
-        }
+        mVideoView.setOnPreparedListener(new MediaPlayer.OnPreparedListener(){
+
+            @Override
+            public void onPrepared(MediaPlayer mp) {
+                Log.d(TAG, "video prepared");
+                if (savedIS != null) {//恢复日志
+                    Log.d(TAG, "true lastPos:" + lastPos);
+                    mVideoView.seekTo((int)lastPos);
+                    setTime((int)lastPos);
+                    //seekTo是异步实现的，所以切换的时候会有seek还没有完成而播放已经开始的现象
+                    //其实seekTo跳转的位置其实并不是参数所带的position，而是离position最近的关键帧
+                    //可以利用seekComplete
+//                    mp.setOnSeekCompleteListener(new MediaPlayer.OnSeekCompleteListener() {
+//                        @Override
+//                        public void onSeekComplete(MediaPlayer mp) {
+//
+//                        }
+//                    });
+                }
+                else {//如果是第一次调用onCreate，lastPos需要初始化
+                    Log.d(TAG, "false lastPos:" + lastPos);
+                    lastPos = 1;
+                    mVideoView.seekTo((int)lastPos);
+                    setTime((int)lastPos);
+                }
+            }
+        });
     }
 
     @Override
     protected void onDestroy() {
         videoUpdater.interrupt();  //退出子线程
         super.onDestroy();
+    }
+
+    private void initialVideoView() {
+        uri = getIntent().getData();
+        setContentView(R.layout.activity_main);
+        mVideoView = findViewById(R.id.video_view);
+        if(uri == null)
+            mVideoView.setVideoPath(getVideoPath(R.raw.dancing));
+        else
+            mVideoView.setVideoURI(uri);
     }
 
     private void initialLandscape() {
@@ -123,9 +156,7 @@ public class MainActivity extends AppCompatActivity {
 
         getSupportActionBar().hide();
 
-        setContentView(R.layout.activity_main);
-        mVideoView = findViewById(R.id.video_view);
-        mVideoView.setVideoPath(getVideoPath(R.raw.dancing));
+        initialVideoView();
 
         mVideoView.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -139,9 +170,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initialPortrai() {
-        setContentView(R.layout.activity_main);
-        mVideoView = findViewById(R.id.video_view);
-        mVideoView.setVideoPath(getVideoPath(R.raw.dancing));
+        initialVideoView();
 
         Button btn_paly = findViewById(R.id.btn_play);
         btn_paly.setOnClickListener(new View.OnClickListener() {
@@ -157,11 +186,19 @@ public class MainActivity extends AppCompatActivity {
     }
     
     private void setTime(int cur) {
+        int length = mVideoView.getDuration();
+        if(length < 0)
+            return;
+        float tmp = (float)cur / (float)length * (float) 100;
+        sk_video.setProgress((int)tmp);
+        Log.d(TAG, "video duration:" + length);
+        Log.d(TAG, "current position:" + cur + " seek bar progress:" +  tmp);
+
         if(cur % 1000 >= 500)
             cur = cur / 1000 + 1;
         else
             cur = cur / 1000;
-        int length = mVideoView.getDuration();
+
         if(length % 1000 >= 500)
             length = length / 1000 + 1;
         else
@@ -173,6 +210,8 @@ public class MainActivity extends AppCompatActivity {
         String time = cur_min + ":" + cur_sec + "/" + length_min + ":" + length_sec;
         //Log.d(TAG, "length" + length);
         tv_videoTime.setText(time);
+
+        lastPos = mVideoView.getCurrentPosition();
     }
 
     private String getVideoPath(int resId) {
@@ -188,7 +227,6 @@ public class MainActivity extends AppCompatActivity {
                     Thread.sleep(500);
                     if(mVideoView.isPlaying()) {
                         mHandler.sendEmptyMessage(UPDATE_VIDEO_PROGRESS);
-                        lastPos = mVideoView.getCurrentPosition();
                     }
                 }
                 catch (InterruptedException e) {
