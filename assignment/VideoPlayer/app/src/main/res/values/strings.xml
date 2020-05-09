@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Video Player</string>
+    <string name="btn_play">播放/暂停</string>
 </resources>
